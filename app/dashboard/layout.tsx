@@ -1,9 +1,9 @@
 import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
+import DashboardLayoutClient from './DashboardLayoutClient';
 
 // Menu items configuration
-const menuItems = [
+export const menuItems = [
     { name: 'ภาพรวม', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6', href: '/dashboard' },
     { name: 'ขายสินค้า', icon: 'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z', href: '/dashboard/pos' },
     { name: 'คลังสินค้า', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4', href: '/dashboard/inventory' },
@@ -45,55 +45,12 @@ export default async function DashboardLayout({
     const { user, profile } = userData;
 
     return (
-        <div className="min-h-screen bg-slate-900 flex">
-            {/* Sidebar */}
-            <aside className="w-64 bg-slate-800 border-r border-slate-700/50 flex flex-col fixed h-full">
-                {/* Logo */}
-                <div className="p-4 border-b border-slate-700/50">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg overflow-hidden bg-white p-0.5 shadow-lg">
-                            <img src="/logo.jpg" alt="EVOLUTION HRD" className="w-full h-full object-contain" />
-                        </div>
-                        <span className="text-white font-bold text-sm">EVOLUTION HRD</span>
-                    </div>
-                </div>
-
-                {/* Menu Items */}
-                <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-                    {menuItems.map((item) => (
-                        <Link
-                            key={item.name}
-                            href={item.href}
-                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group text-slate-400 hover:bg-slate-700/50 hover:text-white"
-                        >
-                            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
-                            </svg>
-                            <span className="font-medium">{item.name}</span>
-                        </Link>
-                    ))}
-                </nav>
-
-                {/* User Section */}
-                <div className="p-4 border-t border-slate-700/50">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-slate-600 to-slate-700 rounded-full flex items-center justify-center">
-                            <span className="text-white font-medium">
-                                {profile?.full_name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'}
-                            </span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-white font-medium truncate">{profile?.full_name || 'User'}</p>
-                            <p className="text-slate-500 text-sm truncate">{user?.email}</p>
-                        </div>
-                    </div>
-                </div>
-            </aside>
-
-            {/* Main Content - with left margin to account for fixed sidebar */}
-            <main className="flex-1 ml-64 overflow-auto">
-                {children}
-            </main>
-        </div>
+        <DashboardLayoutClient
+            menuItems={menuItems}
+            user={{ email: user.email || '' }}
+            profile={{ full_name: profile?.full_name || 'User' }}
+        >
+            {children}
+        </DashboardLayoutClient>
     );
 }
