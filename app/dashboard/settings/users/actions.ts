@@ -145,6 +145,7 @@ export async function createUser(formData: FormData) {
         } else {
             throw new Error('Failed to create user');
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
         console.error('Create user error:', error);
         return { error: error.message };

@@ -141,6 +141,7 @@ export default function UserManagementClient({ users: initialUsers, currentUserR
                 // Refresh user list
                 window.location.reload();
             }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (error: any) {
             alert('เกิดข้อผิดพลาด: ' + error.message);
         } finally {

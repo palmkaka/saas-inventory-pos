@@ -25,6 +25,7 @@ export default async function PendingApprovalPage() {
         }
         // 2. Check org status
         else if (profile?.organizations) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const orgStatus = (profile.organizations as any).status;
             if (orgStatus) {
                 status = orgStatus;

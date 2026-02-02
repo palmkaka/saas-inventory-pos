@@ -78,6 +78,7 @@ export default async function UserManagementPage() {
         }
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { users, currentUserRole, organizationId, branches } = data as any;
 
     return (

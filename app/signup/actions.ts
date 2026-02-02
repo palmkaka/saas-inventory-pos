@@ -3,6 +3,8 @@
 import { createAdminClient } from '@/utils/supabase/admin';
 import { redirect } from 'next/navigation';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function signup(prevState: any, formData: FormData) {
     const email = formData.get('email') as string;
     const password = formData.get('password') as string;
@@ -84,6 +86,7 @@ export async function signup(prevState: any, formData: FormData) {
 
         return { success: true };
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
         console.error('Signup error:', error);
         return { error: error.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่' };

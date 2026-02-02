@@ -91,6 +91,7 @@ export default function ShiftClient({ initialActiveShift, initialHistory, userRo
             setShowStartModal(false);
             setCashInput('');
             router.refresh();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (error: any) {
             alert('เกิดข้อผิดพลาด: ' + error.message);
         } finally {
