@@ -13,7 +13,7 @@ interface MenuItem {
 interface DashboardLayoutClientProps {
     menuItems: MenuItem[];
     user: { email: string };
-    profile: { full_name: string; role: string; branch_name?: string };
+    profile: { full_name: string; role: string; branch_name?: string; is_platform_admin?: boolean };
     children: React.ReactNode;
     isImpersonating?: boolean;
 }
@@ -117,6 +117,21 @@ export default function DashboardLayoutClient({
                         })}
                 </nav>
 
+                {/* Super Admin Link */}
+                {profile.is_platform_admin && (
+                    <div className="px-4 pb-2">
+                        <Link
+                            href="/admin"
+                            className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-lg shadow-purple-900/20"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                            </svg>
+                            <span className="font-bold">ไปหน้า Super Admin</span>
+                        </Link>
+                    </div>
+                )}
+
                 {/* User Section */}
                 <div className="p-4 border-t border-slate-700/50">
                     <div className="flex items-center gap-3">
@@ -134,13 +149,17 @@ export default function DashboardLayoutClient({
                                 </p>
                             )}
                             <p className="text-emerald-400 text-xs font-medium mt-0.5">
-                                {profile.role === 'owner' && '👑 เจ้าของ'}
-                                {profile.role === 'manager' && '📊 ผู้จัดการ'}
-                                {profile.role === 'accountant' && '💰 ฝ่ายบัญชี'}
-                                {profile.role === 'hr' && '👥 ฝ่ายบุคคล'}
-                                {profile.role === 'sales' && '🛒 พนักงานขาย'}
-                                {profile.role === 'inventory' && '📦 พนักงานคลัง'}
-                                {profile.role === 'staff' && '👤 พนักงาน'}
+                                {profile.is_platform_admin ? '🛡️ Super Admin' : (
+                                    <>
+                                        {profile.role === 'owner' && '👑 เจ้าของ'}
+                                        {profile.role === 'manager' && '📊 ผู้จัดการ'}
+                                        {profile.role === 'accountant' && '💰 ฝ่ายบัญชี'}
+                                        {profile.role === 'hr' && '👥 ฝ่ายบุคคล'}
+                                        {profile.role === 'sales' && '🛒 พนักงานขาย'}
+                                        {profile.role === 'inventory' && '📦 พนักงานคลัง'}
+                                        {profile.role === 'staff' && '👤 พนักงาน'}
+                                    </>
+                                )}
                             </p>
                         </div>
                     </div>

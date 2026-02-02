@@ -130,7 +130,8 @@ export default async function DashboardLayout({
             profile={{
                 full_name: profile?.full_name || 'User',
                 role: profile?.role || 'staff',
-                branch_name: branchName
+                branch_name: branchName,
+                is_platform_admin: profile?.is_platform_admin || false
             }}
             isImpersonating={branchName === 'Impersonating'}
         >

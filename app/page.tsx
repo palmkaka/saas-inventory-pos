@@ -87,6 +87,22 @@ export default function LoginPage() {
       }
     }
 
+    // Redirect based on role
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('is_platform_admin')
+        .eq('id', user.id)
+        .single();
+
+      if (profile?.is_platform_admin) {
+        router.push('/admin');
+        router.refresh();
+        return;
+      }
+    }
+
     router.push('/dashboard');
     router.refresh();
   };
