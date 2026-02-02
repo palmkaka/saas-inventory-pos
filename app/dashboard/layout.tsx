@@ -40,6 +40,7 @@ async function getUserData() {
             branch_id, 
             is_active,
             is_platform_admin,
+            is_super_admin,
             organizations ( status )
         `)
         .eq('id', user.id)
@@ -131,7 +132,8 @@ export default async function DashboardLayout({
                 full_name: profile?.full_name || 'User',
                 role: profile?.role || 'staff',
                 branch_name: branchName,
-                is_platform_admin: profile?.is_platform_admin || false
+                is_platform_admin: profile?.is_platform_admin || false,
+                is_super_admin: profile?.is_super_admin || false
             }}
             isImpersonating={branchName === 'Impersonating'}
         >

@@ -92,11 +92,11 @@ export default function LoginPage() {
     if (user) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('is_platform_admin')
+        .select('is_platform_admin, is_super_admin')
         .eq('id', user.id)
         .single();
 
-      if (profile?.is_platform_admin) {
+      if (profile?.is_platform_admin || profile?.is_super_admin) {
         router.push('/admin');
         router.refresh();
         return;

@@ -13,7 +13,7 @@ interface MenuItem {
 interface DashboardLayoutClientProps {
     menuItems: MenuItem[];
     user: { email: string };
-    profile: { full_name: string; role: string; branch_name?: string; is_platform_admin?: boolean };
+    profile: { full_name: string; role: string; branch_name?: string; is_platform_admin?: boolean; is_super_admin?: boolean };
     children: React.ReactNode;
     isImpersonating?: boolean;
 }
@@ -118,7 +118,7 @@ export default function DashboardLayoutClient({
                 </nav>
 
                 {/* Super Admin Link */}
-                {profile.is_platform_admin && (
+                {(profile.is_platform_admin || profile.is_super_admin) && (
                     <div className="px-4 pb-2">
                         <Link
                             href="/admin"
@@ -149,7 +149,7 @@ export default function DashboardLayoutClient({
                                 </p>
                             )}
                             <p className="text-emerald-400 text-xs font-medium mt-0.5">
-                                {profile.is_platform_admin ? '🛡️ Super Admin' : (
+                                {(profile.is_platform_admin || profile.is_super_admin) ? '🛡️ Super Admin' : (
                                     <>
                                         {profile.role === 'owner' && '👑 เจ้าของ'}
                                         {profile.role === 'manager' && '📊 ผู้จัดการ'}
