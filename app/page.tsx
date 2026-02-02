@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
 
@@ -10,6 +10,34 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [signupsAllowed, setSignupsAllowed] = useState(true);
+
+  useEffect(() => {
+    async function checkSettings() {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'maintenance_mode')
+        .single();
+
+      if (data && data.value === 'true') {
+        setMaintenanceMode(true);
+      }
+
+      const { data: signupsData } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'allow_signups')
+        .single();
+
+      if (signupsData && signupsData.value === 'false') {
+        setSignupsAllowed(false);
+      }
+    }
+    checkSettings();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,8 +45,15 @@ export default function LoginPage() {
     setError(null);
 
     const supabase = createClient();
+
+    // Auto-append dummy domain if username is entered
+    let finalEmail = email;
+    if (!email.includes('@')) {
+      finalEmail = `${email}@no-email.local`;
+    }
+
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: finalEmail,
       password,
     });
 
@@ -26,6 +61,30 @@ export default function LoginPage() {
       setError(error.message);
       setLoading(false);
       return;
+    }
+
+    // Check Maintenance Mode
+    if (maintenanceMode) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('is_platform_admin, role')
+          .eq('id', user.id)
+          .single();
+
+        // Allow if Platform Admin OR explicitly whitelisted role (optional, for now strictly platform admin or maybe 'owner')
+        // Let's stick to Platform Admin as per requirement "Admin เข้าได้ปกติ" implies Super Admin usually, 
+        // but maybe "System Administrator" which is usually the Owner.
+        // Let's check is_platform_admin.
+
+        if (!profile?.is_platform_admin) {
+          await supabase.auth.signOut();
+          setError('ระบบอยู่ระหว่างการปิดปรับปรุง (Maintenance Mode)');
+          setLoading(false);
+          return;
+        }
+      }
     }
 
     router.push('/dashboard');
@@ -52,6 +111,21 @@ export default function LoginPage() {
             <p className="text-slate-400 mt-2">เข้าสู่ระบบเพื่อจัดการธุรกิจของคุณ</p>
           </div>
 
+          {/* Maintenance Alert */}
+          {maintenanceMode && (
+            <div className="mb-6 p-4 bg-orange-500/10 border border-orange-500/30 rounded-xl flex items-start gap-3">
+              <svg className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <h3 className="text-orange-400 font-medium text-sm">ปิดปรับปรุงระบบ</h3>
+                <p className="text-orange-400/80 text-xs mt-1">
+                  ระบบเปิดให้เฉพาะผู้ดูแลระบบเข้าใช้งานเท่านั้น ผู้ใช้งานทั่วไปจะไม่สามารถเข้าสู่ระบบได้
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Error Alert */}
           {error && (
             <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
@@ -62,13 +136,13 @@ export default function LoginPage() {
           {/* Login Form */}
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">อีเมล</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">อีเมล หรือ ชื่อผู้ใช้</label>
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                placeholder="กรอกอีเมลของคุณ"
+                placeholder="กรอกอีเมล หรือ ชื่อผู้ใช้"
                 className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
             </div>
@@ -106,9 +180,11 @@ export default function LoginPage() {
 
           {/* Footer */}
           <div className="mt-6 text-center">
-            <p className="text-slate-500 text-sm">
-              ยังไม่มีบัญชี? <a href="/signup" className="text-blue-400 hover:text-blue-300 font-medium">สมัครสมาชิก</a>
-            </p>
+            {signupsAllowed && (
+              <p className="text-slate-500 text-sm">
+                ยังไม่มีบัญชี? <a href="/signup" className="text-blue-400 hover:text-blue-300 font-medium">สมัครสมาชิก</a>
+              </p>
+            )}
           </div>
         </div>
 

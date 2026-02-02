@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
@@ -10,8 +10,31 @@ export default function SignUpPage() {
     const supabase = createClient();
 
     const [loading, setLoading] = useState(false);
+    const [pageLoading, setPageLoading] = useState(true);
+    const [signupsAllowed, setSignupsAllowed] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
+
+    useEffect(() => {
+        async function checkSettings() {
+            try {
+                const { data } = await supabase
+                    .from('system_settings')
+                    .select('value')
+                    .eq('key', 'allow_signups')
+                    .single();
+
+                if (data && data.value === 'false') {
+                    setSignupsAllowed(false);
+                }
+            } catch (err) {
+                console.error('Error checking system settings:', err);
+            } finally {
+                setPageLoading(false);
+            }
+        }
+        checkSettings();
+    }, [supabase]);
 
     const [formData, setFormData] = useState({
         email: '',
@@ -24,71 +47,54 @@ export default function SignUpPage() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
-
-        // Validate
-        if (formData.password !== formData.confirmPassword) {
-            setError('รหัสผ่านไม่ตรงกัน');
-            return;
-        }
-
-        if (formData.password.length < 6) {
-            setError('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
-            return;
-        }
-
         setLoading(true);
 
-        try {
-            // 1. Create auth user
-            const { data: authData, error: authError } = await supabase.auth.signUp({
-                email: formData.email,
-                password: formData.password,
-            });
+        const submitData = new FormData();
+        Object.entries(formData).forEach(([key, value]) => {
+            submitData.append(key, value);
+        });
 
-            if (authError) throw authError;
-            if (!authData.user) throw new Error('ไม่สามารถสร้างบัญชีได้');
+        // Import dynamically to avoid server-action-in-client-component issues if mixed improperly, 
+        // but here we can just import the action if we defined it as 'use server' at top of actions.ts
+        const { signup } = await import('./actions'); // Dynamic import to be safe or just direct import
 
-            // 2. Create organization
-            const slug = formData.companyName
-                .toLowerCase()
-                .replace(/\s+/g, '-')
-                .replace(/[^a-z0-9-]/g, '') + '-' + Date.now().toString(36);
+        const result = await signup(null, submitData);
 
-            const { data: org, error: orgError } = await supabase
-                .from('organizations')
-                .insert({
-                    name: formData.companyName,
-                    slug: slug,
-                })
-                .select('id')
-                .single();
-
-            if (orgError) throw orgError;
-
-            // 3. Create profile
-            const { error: profileError } = await supabase
-                .from('profiles')
-                .insert({
-                    id: authData.user.id,
-                    organization_id: org.id,
-                    role: 'OWNER',
-                    full_name: formData.fullName,
-                });
-
-            if (profileError) throw profileError;
-
+        if (result?.error) {
+            setError(result.error);
+            setLoading(false);
+        } else {
             setSuccess(true);
             setTimeout(() => {
-                router.push('/dashboard');
+                // Auto login logic could be added here, but for now redirect to login
+                // Or since we created it admin-side, user needs to login manually.
+                router.push('/');
             }, 2000);
-
-        } catch (err) {
-            console.error(err);
-            setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด กรุณาลองใหม่');
-        } finally {
-            setLoading(false);
         }
     };
+
+    if (pageLoading) {
+        return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">Loading...</div>;
+    }
+
+    if (!signupsAllowed) {
+        return (
+            <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+                <div className="w-full max-w-md text-center">
+                    <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-800 rounded-2xl mb-6">
+                        <svg className="w-8 h-8 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                    </div>
+                    <h1 className="text-2xl font-bold text-white mb-2">ปิดรับสมัครสมาชิกชั่วคราว</h1>
+                    <p className="text-slate-400 mb-8">ขออภัย ขณะนี้ระบบปิดรับสมัครสมาชิกใหม่ชั่วคราว<br />กรุณาติดต่อผู้ดูแลระบบ</p>
+                    <Link href="/" className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition-colors">
+                        กลับหน้าเข้าสู่ระบบ
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">

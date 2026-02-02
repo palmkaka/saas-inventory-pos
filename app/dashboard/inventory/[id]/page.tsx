@@ -55,6 +55,9 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, string | number | boolean>>({});
 
+    // Branch state
+    const [branchId, setBranchId] = useState<string | null>(null);
+
     // Unwrap params
     useEffect(() => {
         params.then((p) => setProductId(p.id));
@@ -70,11 +73,24 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
 
             const { data: profile } = await supabase
                 .from('profiles')
-                .select('organization_id')
+                .select('organization_id, branch_id')
                 .eq('id', user.id)
                 .single();
 
             if (!profile?.organization_id) return;
+
+            // Determine Branch
+            let currentBranchId = profile.branch_id;
+            if (!currentBranchId) {
+                const { data: mainBranch } = await supabase
+                    .from('branches')
+                    .select('id')
+                    .eq('organization_id', profile.organization_id)
+                    .eq('is_main', true)
+                    .single();
+                currentBranchId = mainBranch?.id;
+            }
+            setBranchId(currentBranchId);
 
             // Fetch categories
             const { data: cats } = await supabase
@@ -84,7 +100,7 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
                 .order('name');
             setCategories(cats || []);
 
-            // Fetch product
+            // 1. Fetch product first
             const { data: product, error: productError } = await supabase
                 .from('products')
                 .select('*')
@@ -97,14 +113,31 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
                 return;
             }
 
-            // Pre-fill form
+            // 2. Fetch stock if we have a branch
+            let currentStock = 0;
+            let lowStock = product.low_stock_threshold || 5;
+
+            if (currentBranchId) {
+                const { data: stock } = await supabase
+                    .from('product_stocks')
+                    .select('quantity, low_stock_threshold')
+                    .eq('product_id', productId)
+                    .eq('branch_id', currentBranchId)
+                    .maybeSingle();
+
+                if (stock) {
+                    currentStock = stock.quantity;
+                    lowStock = stock.low_stock_threshold;
+                }
+            }
+
             setFormData({
                 name: product.name || '',
                 sku: product.sku || '',
                 cost_price: product.cost_price?.toString() || '',
                 selling_price: product.selling_price?.toString() || '',
-                current_stock: product.current_stock?.toString() || '',
-                low_stock_threshold: product.low_stock_threshold?.toString() || '5',
+                current_stock: currentStock.toString(),
+                low_stock_threshold: lowStock.toString(),
             });
             setSelectedCategory(product.category_id || '');
             setDynamicAttributes(product.attributes || {});
@@ -151,7 +184,7 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!productId) return;
+        if (!productId || !branchId) return;
 
         setError(null);
         setSaving(true);
@@ -162,10 +195,10 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
                 sku: formData.sku || null,
                 cost_price: parseFloat(formData.cost_price) || 0,
                 selling_price: parseFloat(formData.selling_price) || 0,
-                current_stock: parseInt(formData.current_stock) || 0,
-                low_stock_threshold: parseInt(formData.low_stock_threshold) || 5,
+                low_stock_threshold: parseInt(formData.low_stock_threshold) || 5, // Fallback on product level too
                 category_id: selectedCategory || null,
                 attributes: dynamicAttributes,
+                // current_stock is removed from here
             };
 
             const { error: updateError } = await supabase
@@ -174,6 +207,21 @@ export default function EditProductPage({ params }: { params: Promise<{ id: stri
                 .eq('id', productId);
 
             if (updateError) throw updateError;
+
+            // Upsert stock logic
+            const currentStock = parseInt(formData.current_stock) || 0;
+            const lowStock = parseInt(formData.low_stock_threshold) || 5;
+
+            const { error: stockError } = await supabase
+                .from('product_stocks')
+                .upsert({
+                    product_id: productId,
+                    branch_id: branchId,
+                    quantity: currentStock,
+                    low_stock_threshold: lowStock
+                }, { onConflict: 'product_id, branch_id' });
+
+            if (stockError) throw stockError;
 
             setSuccess(true);
             setTimeout(() => {

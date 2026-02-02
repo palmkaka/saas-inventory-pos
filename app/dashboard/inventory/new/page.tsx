@@ -40,6 +40,8 @@ export default function NewProductPage() {
         low_stock_threshold: '5',
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, string | number | boolean>>({});
+    const [imageFile, setImageFile] = useState<File | null>(null);
+    const [imagePreview, setImagePreview] = useState<string | null>(null);
 
     // Fetch categories
     useEffect(() => {
@@ -100,6 +102,22 @@ export default function NewProductPage() {
         fetchFieldDefinitions();
     }, [selectedCategory, supabase]);
 
+    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            if (file.size > 5 * 1024 * 1024) { // 5MB limit
+                alert('File size too large. Max 5MB.');
+                return;
+            }
+            setImageFile(file);
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setImagePreview(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
@@ -111,12 +129,68 @@ export default function NewProductPage() {
 
             const { data: profile } = await supabase
                 .from('profiles')
-                .select('organization_id')
+                .select('organization_id, branch_id')
                 .eq('id', user.id)
                 .single();
 
             if (!profile?.organization_id) throw new Error('No organization assigned');
 
+            // Image Upload Logic
+            let imageUrl = null;
+            if (imageFile) {
+                const fileExt = imageFile.name.split('.').pop();
+                const fileName = `${Date.now()}.${fileExt}`;
+                const filePath = `${profile.organization_id}/${fileName}`;
+
+                const { error: uploadError } = await supabase.storage
+                    .from('products')
+                    .upload(filePath, imageFile);
+
+                if (uploadError) throw uploadError;
+
+                const { data: { publicUrl } } = supabase.storage
+                    .from('products')
+                    .getPublicUrl(filePath);
+
+                imageUrl = publicUrl;
+            }
+
+            // Determine branch to add stock to
+            // If user has a branch_id, use that. If not, try to find Main Branch
+            let targetBranchId = profile.branch_id;
+
+            if (!targetBranchId) {
+                // 1. Try to find defined 'Main Branch'
+                const { data: mainBranch } = await supabase
+                    .from('branches')
+                    .select('id')
+                    .eq('organization_id', profile.organization_id)
+                    .eq('is_main', true)
+                    .maybeSingle();
+                targetBranchId = mainBranch?.id;
+
+                // 2. Fallback: If no Main Branch (legacy/error data), grab *ANY* branch
+                if (!targetBranchId) {
+                    const { data: anyBranch } = await supabase
+                        .from('branches')
+                        .select('id')
+                        .eq('organization_id', profile.organization_id)
+                        .limit(1)
+                        .maybeSingle();
+
+                    targetBranchId = anyBranch?.id;
+                }
+            }
+
+            // Only throw error if trying to add stock but no branch found
+            const startStock = parseInt(formData.current_stock) || 0;
+            if (startStock > 0 && !targetBranchId) {
+                throw new Error('No branch found to assign stock. Please ask admin to assign you to a branch or set a main branch.');
+            }
+
+            const lowStock = parseInt(formData.low_stock_threshold) || 5;
+
+            // 1. Insert Product
             const productData = {
                 organization_id: profile.organization_id,
                 category_id: selectedCategory || null,
@@ -124,21 +198,45 @@ export default function NewProductPage() {
                 sku: formData.sku || null,
                 cost_price: parseFloat(formData.cost_price) || 0,
                 selling_price: parseFloat(formData.selling_price) || 0,
-                current_stock: parseInt(formData.current_stock) || 0,
-                low_stock_threshold: parseInt(formData.low_stock_threshold) || 5,
+                current_stock: 0, // Deprecated, use product_stocks
+                low_stock_threshold: lowStock,
                 attributes: dynamicAttributes,
+                image_url: imageUrl,
             };
 
-            const { error: insertError } = await supabase.from('products').insert(productData);
+            const { data: newProduct, error: insertError } = await supabase
+                .from('products')
+                .insert(productData)
+                .select()
+                .single();
 
             if (insertError) throw insertError;
+
+            // 2. Insert Stock for this Branch (Only if branch exists)
+            if (targetBranchId && (startStock > 0 || newProduct.id)) {
+                const { error: stockError } = await supabase
+                    .from('product_stocks')
+                    .insert({
+                        product_id: newProduct.id,
+                        branch_id: targetBranchId,
+                        quantity: startStock,
+                        low_stock_threshold: lowStock
+                    });
+
+                if (stockError) {
+                    console.error('Error creating stock:', stockError);
+                    // Non-blocking error, product is created
+                }
+            }
 
             setSuccess(true);
             setTimeout(() => {
                 router.push('/dashboard/inventory');
             }, 1500);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to create product');
+        } catch (err: any) {
+            console.error('Product creation error:', err);
+            const errorMessage = err?.message || err?.error_description || JSON.stringify(err) || 'Failed to create product';
+            setError(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -264,6 +362,35 @@ export default function NewProductPage() {
                             </svg>
                             ข้อมูลพื้นฐาน
                         </h2>
+
+                        {/* Image Upload */}
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium text-slate-300 mb-2">รูปสินค้า</label>
+                            <div className="flex items-center gap-6">
+                                <div className="relative w-32 h-32 rounded-xl bg-slate-900 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden group hover:border-blue-500 transition-colors">
+                                    {imagePreview ? (
+                                        <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                                    ) : (
+                                        <div className="text-center text-slate-500">
+                                            <svg className="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                            </svg>
+                                            <span className="text-xs">Upload</span>
+                                        </div>
+                                    )}
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleImageChange}
+                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                    />
+                                </div>
+                                <div className="flex-1">
+                                    <p className="text-sm text-slate-400 mb-1">รองรับไฟล์: JPG, PNG, WEBP</p>
+                                    <p className="text-xs text-slate-500">ขนาดไม่เกิน 5MB. รูปภาพจะช่วยให้การขายและจัดการสต็อกง่ายขึ้น</p>
+                                </div>
+                            </div>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="md:col-span-2">
                                 <label className="block text-sm font-medium text-slate-300 mb-2">

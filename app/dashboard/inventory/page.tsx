@@ -10,6 +10,7 @@ interface Product {
     selling_price: number;
     current_stock: number;
     category_name: string | null;
+    image_url: string | null;
 }
 
 async function getProducts() {
@@ -23,47 +24,83 @@ async function getProducts() {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id')
+        .select('organization_id, branch_id')
         .eq('id', user.id)
         .single();
 
     if (!profile?.organization_id) {
-        return { products: [], organizationId: null };
+        return { products: [], organizationId: null, branchName: null };
     }
 
-    const { data: products, error } = await supabase
+    // Determine branch to show
+    // If user has a branch_id, use that. If not (e.g. owner/admin not assigned), try to find Main Branch
+    let targetBranchId = profile.branch_id;
+
+    if (!targetBranchId) {
+        const { data: mainBranch } = await supabase
+            .from('branches')
+            .select('id')
+            .eq('organization_id', profile.organization_id)
+            .eq('is_main', true)
+            .single();
+        targetBranchId = mainBranch?.id;
+    }
+
+    // Fetch branch details for display
+    let branchName = 'Unknown Branch';
+    if (targetBranchId) {
+        const { data: branch } = await supabase.from('branches').select('name').eq('id', targetBranchId).single();
+        if (branch) branchName = branch.name;
+    }
+
+    let query = supabase
         .from('products')
         .select(`
       id,
       name,
       sku,
       selling_price,
-      current_stock,
+      image_url,
       categories (
         name
+      ),
+      product_stocks (
+        quantity
       )
     `)
-        .eq('organization_id', profile.organization_id)
-        .order('created_at', { ascending: false });
+        .eq('organization_id', profile.organization_id);
+
+    if (targetBranchId) {
+        query = query.eq('product_stocks.branch_id', targetBranchId); // Filter stocks for this branch
+    }
+
+    const { data: products, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
         console.error('Error fetching products:', error);
-        return { products: [], organizationId: profile.organization_id };
+        return { products: [], organizationId: profile.organization_id, branchName };
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const transformedProducts: Product[] = (products || []).map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        sku: p.sku,
-        selling_price: p.selling_price,
-        current_stock: p.current_stock,
-        category_name: Array.isArray(p.categories)
-            ? p.categories[0]?.name || null
-            : p.categories?.name || null,
-    }));
+    const transformedProducts: Product[] = (products || []).map((p: any) => {
+        // Find stock for the target branch
+        const stockRecord = p.product_stocks?.find((s: any) => s.quantity !== undefined); // .eq filter above might return array of 1 or 0
+        const quantity = stockRecord ? stockRecord.quantity : 0; // Default to 0 if no stock record found for this branch
 
-    return { products: transformedProducts, organizationId: profile.organization_id };
+        return {
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            selling_price: p.selling_price,
+            current_stock: quantity, // Use branch stock
+            category_name: Array.isArray(p.categories)
+                ? p.categories[0]?.name || null
+                : p.categories?.name || null,
+            image_url: p.image_url || null,
+        };
+    });
+
+    return { products: transformedProducts, organizationId: profile.organization_id, branchName };
 }
 
 export default async function InventoryPage() {
@@ -73,7 +110,7 @@ export default async function InventoryPage() {
         redirect('/');
     }
 
-    const { products, organizationId } = result;
+    const { products, organizationId, branchName } = result;
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('th-TH', {
@@ -89,8 +126,15 @@ export default async function InventoryPage() {
             <header className="bg-slate-800/50 backdrop-blur-sm border-b border-slate-700/50 px-6 py-4 sticky top-0 z-10">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-bold text-white">จัดการคลังสินค้า</h1>
-                        <p className="text-slate-400 text-sm mt-1">จัดการสินค้าและสต็อกของคุณ</p>
+                        <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+                            จัดการคลังสินค้า
+                            {branchName && (
+                                <span className="text-sm font-normal bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full border border-blue-500/30">
+                                    {branchName}
+                                </span>
+                            )}
+                        </h1>
+                        <p className="text-slate-400 text-sm mt-1">จัดการสินค้าและสต็อกของสาขานี้</p>
                     </div>
                     <div className="flex items-center gap-2">
                         <Link
@@ -102,15 +146,26 @@ export default async function InventoryPage() {
                             </svg>
                             จัดการหมวดหมู่
                         </Link>
-                        <Link
-                            href="/dashboard/inventory/new"
-                            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 transition-all duration-200"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                            เพิ่มสินค้า
-                        </Link>
+                        <div className="flex items-center gap-4">
+                            <Link
+                                href="/dashboard/inventory/transfer"
+                                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-xl transition-colors flex items-center gap-2"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                                </svg>
+                                โอนย้ายสินค้า
+                            </Link>
+                            <Link
+                                href="/dashboard/inventory/new"
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-blue-500/30 flex items-center gap-2"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                </svg>
+                                เพิ่มสินค้า
+                            </Link>
+                        </div>
                     </div>
                 </div>
             </header>
@@ -143,78 +198,73 @@ export default async function InventoryPage() {
                         </Link>
                     </div>
                 ) : (
-                    <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden">
-                        {/* Table */}
-                        <table className="w-full">
-                            <thead>
-                                <tr className="bg-slate-800 border-b border-slate-700/50">
-                                    <th className="text-left px-6 py-4 text-sm font-medium text-slate-400 uppercase tracking-wider">สินค้า</th>
-                                    <th className="text-left px-6 py-4 text-sm font-medium text-slate-400 uppercase tracking-wider">หมวดหมู่</th>
-                                    <th className="text-right px-6 py-4 text-sm font-medium text-slate-400 uppercase tracking-wider">ราคา</th>
-                                    <th className="text-right px-6 py-4 text-sm font-medium text-slate-400 uppercase tracking-wider">สต็อก</th>
-                                    <th className="text-center px-6 py-4 text-sm font-medium text-slate-400 uppercase tracking-wider">จัดการ</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-700/50">
-                                {products.map((product) => (
-                                    <tr key={product.id} className="hover:bg-slate-700/30 transition-colors">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-10 h-10 bg-gradient-to-br from-slate-600 to-slate-700 rounded-lg flex items-center justify-center">
-                                                    <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                                                    </svg>
-                                                </div>
-                                                <div>
-                                                    <p className="text-white font-medium">{product.name}</p>
-                                                    <p className="text-slate-500 text-sm">{product.sku || 'ไม่มี SKU'}</p>
-                                                </div>
+                    <>
+                        {/* Card Grid View */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                            {products.map((product) => (
+                                <div key={product.id} className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden hover:border-blue-500/50 transition-all group">
+                                    {/* Product Image */}
+                                    <div className="aspect-square relative bg-slate-900/50">
+                                        {product.image_url ? (
+                                            <img
+                                                src={product.image_url}
+                                                alt={product.name}
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center">
+                                                <svg className="w-16 h-16 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                                </svg>
                                             </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className="px-2.5 py-1 bg-slate-700/50 text-slate-300 text-sm rounded-lg">
-                                                {product.category_name || 'ไม่ระบุ'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <span className="text-white font-medium">{formatCurrency(product.selling_price)}</span>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <span className={`px-2.5 py-1 rounded-lg text-sm font-medium ${product.current_stock < 10
-                                                ? 'bg-red-500/20 text-red-400'
-                                                : product.current_stock < 50
-                                                    ? 'bg-yellow-500/20 text-yellow-400'
-                                                    : 'bg-emerald-500/20 text-emerald-400'
-                                                }`}>
-                                                {product.current_stock} ชิ้น
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <div className="flex items-center justify-center gap-1">
+                                        )}
+                                        {/* Stock Badge */}
+                                        <div className={`absolute top-2 right-2 px-2 py-1 rounded-lg text-xs font-medium ${product.current_stock < 10
+                                            ? 'bg-red-500/90 text-white'
+                                            : product.current_stock < 50
+                                                ? 'bg-yellow-500/90 text-white'
+                                                : 'bg-emerald-500/90 text-white'
+                                            }`}>
+                                            {product.current_stock} ชิ้น
+                                        </div>
+                                        {/* Category Badge */}
+                                        {product.category_name && (
+                                            <div className="absolute top-2 left-2 px-2 py-1 bg-slate-900/80 text-slate-300 text-xs rounded-lg">
+                                                {product.category_name}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {/* Product Info */}
+                                    <div className="p-4">
+                                        <h3 className="text-white font-medium truncate" title={product.name}>{product.name}</h3>
+                                        <p className="text-slate-500 text-sm mb-2">{product.sku || 'ไม่มี SKU'}</p>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-blue-400 font-bold text-lg">{formatCurrency(product.selling_price)}</span>
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <Link
                                                     href={`/dashboard/inventory/${product.id}`}
-                                                    className="p-2 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
-                                                    title="แก้ไขสินค้า"
+                                                    className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
+                                                    title="แก้ไข"
                                                 >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                                     </svg>
                                                 </Link>
                                                 <DeleteButton productId={product.id} productName={product.name} />
                                             </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
 
                         {/* Footer */}
-                        <div className="px-6 py-4 bg-slate-800/50 border-t border-slate-700/50">
+                        <div className="mt-4 text-center">
                             <p className="text-slate-500 text-sm">
                                 แสดง {products.length} สินค้า
                             </p>
                         </div>
-                    </div>
+                    </>
                 )}
             </div>
         </div>
