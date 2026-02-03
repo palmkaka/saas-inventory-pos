@@ -2,6 +2,42 @@
 
 import { useState, useEffect } from 'react';
 import { fetchPayrollPeriods, fetchPayrollRecords, createPayrollPeriod, calculatePayrollAction, markPeriodAsPaid } from './actions';
+import Link from 'next/link';
+import { exportToExcel, exportToPDF, exportPayslipPDF } from '@/utils/export';
+
+interface PayrollPeriod {
+    id: string;
+    period_name: string;
+    period_start: string;
+    period_end: string;
+    status: string;
+    calculated_at: string | null;
+    paid_at: string | null;
+}
+
+interface PayrollRecord {
+    id: string;
+    user_id: string;
+    base_salary: number;
+    hours_worked: number;
+    days_worked: number;
+    position_allowance: number;
+    diligence_allowance: number;
+    other_allowance: number;
+    commission_total: number;
+    total_earnings: number;
+    social_security: number;
+    withholding_tax: number;
+    loan_deduction: number;
+    other_deduction: number;
+    total_deductions: number;
+    net_salary: number;
+    profile: {
+        first_name: string;
+        last_name: string;
+        email: string;
+    };
+}
 
 export default function PayrollClient({
     initialOrganizationId,
