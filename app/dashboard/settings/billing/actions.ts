@@ -43,6 +43,7 @@ export async function submitPayment(formData: FormData) {
 
 // New action to fetch billing info bypassing RLS
 import { createAdminClient } from '@/utils/supabase/admin';
+import { cookies } from 'next/headers';
 
 export async function getBillingInfo() {
     const supabase = await createClient(); // Authenticate user
@@ -53,11 +54,22 @@ export async function getBillingInfo() {
     // Get Org ID
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id')
+        .select('organization_id, is_platform_admin')
         .eq('id', user.id)
         .single();
 
     if (!profile?.organization_id) return { error: 'Organization not found' };
+
+    let effectiveOrgId = profile.organization_id;
+
+    // Impersonation Logic
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+        }
+    }
 
     // Use Admin Client to fetch subscription data (bypassing RLS)
     const adminClient = createAdminClient();
@@ -66,21 +78,21 @@ export async function getBillingInfo() {
     const { data: org } = await adminClient
         .from('organizations')
         .select('subscription_plan, status')
-        .eq('id', profile.organization_id)
+        .eq('id', effectiveOrgId)
         .single();
 
     // Get subscription record
     const { data: sub } = await adminClient
         .from('subscriptions')
         .select('*')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .maybeSingle();
 
     // Get Transactions
     const { data: txs } = await adminClient
         .from('payment_transactions')
         .select('*')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .order('payment_date', { ascending: false });
 
     // Construct simplified subscription object
@@ -93,6 +105,6 @@ export async function getBillingInfo() {
     return {
         subscription,
         transactions: txs || [],
-        organizationId: profile.organization_id
+        organizationId: effectiveOrgId
     };
 }
