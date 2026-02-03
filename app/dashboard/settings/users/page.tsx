@@ -10,6 +10,8 @@ interface User {
     created_at: string;
 }
 
+import { cookies } from 'next/headers';
+
 async function getUsers() {
     const supabase = await createClient();
 
@@ -21,7 +23,7 @@ async function getUsers() {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id, role')
+        .select('organization_id, role, is_platform_admin')
         .eq('id', user.id)
         .single();
 
@@ -29,15 +31,26 @@ async function getUsers() {
         return { users: [], currentUserRole: null, organizationId: '', branches: [] };
     }
 
-    // เฉพาะ Owner และ HR เท่านั้นที่เข้าหน้านี้ได้
-    if (profile.role !== 'owner' && profile.role !== 'hr') {
+    // เฉพาะ Owner และ HR หรือ Platform Admin เท่านั้นที่เข้าหน้านี้ได้
+    if (profile.role !== 'owner' && profile.role !== 'hr' && !profile.is_platform_admin) {
         return { error: 'Unauthorized' };
+    }
+
+    let effectiveOrgId = profile.organization_id;
+
+    // Impersonation Logic
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+        }
     }
 
     const { data: users, error } = await supabase
         .from('profiles')
         .select('id, email, full_name, role, created_at')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -48,13 +61,13 @@ async function getUsers() {
     const { data: branches } = await supabase
         .from('branches')
         .select('id, name')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .order('name');
 
     return {
         users: users || [],
         currentUserRole: profile.role,
-        organizationId: profile.organization_id,
+        organizationId: effectiveOrgId,
         branches: branches || []
     };
 }

@@ -59,11 +59,21 @@ export default function CommissionReportPage() {
 
         const { data: profile } = await supabase
             .from('profiles')
-            .select('organization_id, role')
+            .select('organization_id, role, is_platform_admin')
             .eq('id', user.id)
             .single();
 
         if (!profile) return;
+
+        let effectiveOrgId = profile.organization_id;
+
+        // Impersonation Logic
+        if (profile.is_platform_admin) {
+            const match = document.cookie.match(new RegExp('(^| )x-impersonate-org-id-v2=([^;]+)'));
+            if (match) {
+                effectiveOrgId = match[2];
+            }
+        }
 
         // Fetch commission records
         const { data: recordsData } = await supabase
@@ -73,7 +83,7 @@ export default function CommissionReportPage() {
                 profile:profiles(first_name, last_name, email),
                 order:orders(id, total_amount)
             `)
-            .eq('organization_id', profile.organization_id)
+            .eq('organization_id', effectiveOrgId)
             .gte('created_at', `${startDate}T00:00:00`)
             .lte('created_at', `${endDate}T23:59:59`)
             .order('created_at', { ascending: false });

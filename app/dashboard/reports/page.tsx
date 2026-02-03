@@ -10,6 +10,8 @@ interface Order {
     seller_name: string | null;
 }
 
+import { cookies } from 'next/headers';
+
 async function getReportsData() {
     const supabase = await createClient();
 
@@ -20,12 +22,23 @@ async function getReportsData() {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id')
+        .select('organization_id, is_platform_admin')
         .eq('id', user.id)
         .single();
 
     if (!profile?.organization_id) {
         return { orders: [], organizationId: null };
+    }
+
+    let effectiveOrgId = profile.organization_id;
+
+    // Impersonation Logic
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+        }
     }
 
     const { data: orders, error } = await supabase
@@ -37,7 +50,7 @@ async function getReportsData() {
       created_at,
       profiles (full_name)
     `)
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -177,8 +190,8 @@ export default async function ReportsPage() {
                                         </td>
                                         <td className="px-6 py-4 text-center">
                                             <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${order.status === 'COMPLETED'
-                                                    ? 'bg-emerald-500/20 text-emerald-400'
-                                                    : 'bg-yellow-500/20 text-yellow-400'
+                                                ? 'bg-emerald-500/20 text-emerald-400'
+                                                : 'bg-yellow-500/20 text-yellow-400'
                                                 }`}>
                                                 {order.status === 'COMPLETED' ? 'เสร็จสิ้น' : 'รอดำเนินการ'}
                                             </span>

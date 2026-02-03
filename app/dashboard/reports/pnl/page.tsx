@@ -14,6 +14,8 @@ interface MonthlyData {
 
 const monthNames = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 
+import { cookies } from 'next/headers';
+
 async function getPnLData(year: number) {
     const supabase = await createClient();
 
@@ -24,12 +26,23 @@ async function getPnLData(year: number) {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id')
+        .select('organization_id, is_platform_admin')
         .eq('id', user.id)
         .single();
 
     if (!profile?.organization_id) {
         return { data: null, organizationId: null, year };
+    }
+
+    let effectiveOrgId = profile.organization_id;
+
+    // Impersonation Logic
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+        }
     }
 
     const startDate = `${year}-01-01`;
@@ -39,7 +52,7 @@ async function getPnLData(year: number) {
     const { data: orders } = await supabase
         .from('orders')
         .select('total_amount, created_at')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .gte('created_at', startDate)
         .lte('created_at', endDate);
 
@@ -53,7 +66,7 @@ async function getPnLData(year: number) {
                 group_type
             )
         `)
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .gte('expense_date', startDate)
         .lte('expense_date', endDate);
 

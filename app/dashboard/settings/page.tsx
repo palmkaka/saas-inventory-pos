@@ -37,7 +37,7 @@ export default function SettingsPage() {
 
             const { data: profile } = await supabase
                 .from('profiles')
-                .select('organization_id')
+                .select('organization_id, is_platform_admin')
                 .eq('id', user.id)
                 .single();
 
@@ -46,12 +46,22 @@ export default function SettingsPage() {
                 return;
             }
 
-            setOrganizationId(profile.organization_id);
+            let effectiveOrgId = profile.organization_id;
+
+            // Impersonation Logic
+            if (profile.is_platform_admin) {
+                const match = document.cookie.match(new RegExp('(^| )x-impersonate-org-id-v2=([^;]+)'));
+                if (match) {
+                    effectiveOrgId = match[2];
+                }
+            }
+
+            setOrganizationId(effectiveOrgId);
 
             const { data: org } = await supabase
                 .from('organizations')
                 .select('name, config_settings')
-                .eq('id', profile.organization_id)
+                .eq('id', effectiveOrgId)
                 .single();
 
             if (org) {
