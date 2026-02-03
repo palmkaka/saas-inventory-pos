@@ -116,7 +116,7 @@ export default function PayrollClient({
         setPeriodName('');
         setPeriodStart('');
         setPeriodEnd('');
-        fetchPeriods();
+        fetchPeriods(organizationId);
     };
 
     const calculatePayroll = async () => {
@@ -247,7 +247,7 @@ export default function PayrollClient({
                 .eq('id', selectedPeriod.id);
 
             // Refresh data
-            await fetchPeriods();
+            await fetchPeriods(organizationId);
             await fetchRecords(selectedPeriod.id);
             setSelectedPeriod({ ...selectedPeriod, status: 'CALCULATED' });
 
@@ -261,7 +261,7 @@ export default function PayrollClient({
     };
 
     const markAsPaid = async () => {
-        if (!selectedPeriod) return;
+        if (!selectedPeriod || !organizationId) return;
         if (!confirm('ยืนยันการจ่ายเงินเดือนงวดนี้?')) return;
 
         await supabase
@@ -269,7 +269,7 @@ export default function PayrollClient({
             .update({ status: 'PAID', paid_at: new Date().toISOString() })
             .eq('id', selectedPeriod.id);
 
-        await fetchPeriods();
+        await fetchPeriods(organizationId);
         setSelectedPeriod({ ...selectedPeriod, status: 'PAID' });
     };
 
