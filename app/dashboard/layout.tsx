@@ -124,6 +124,7 @@ export default async function DashboardLayout({
     }
 
     const { user, profile, branchName } = userData;
+    const activeAnnouncements = await getActiveAnnouncements();
 
     return (
         <DashboardLayoutClient
@@ -137,6 +138,7 @@ export default async function DashboardLayout({
                 is_super_admin: profile?.is_super_admin || false
             }}
             isImpersonating={branchName === 'Impersonating'}
+            announcements={activeAnnouncements}
         >
             {children}
         </DashboardLayoutClient>
