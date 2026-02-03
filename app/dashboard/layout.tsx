@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 import DashboardLayoutClient from './DashboardLayoutClient';
+import { getActiveAnnouncements } from '@/app/admin/announcements/actions';
 
 // Menu items configuration
 export const menuItems = [

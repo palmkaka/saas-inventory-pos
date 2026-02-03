@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Announcement } from '@/app/admin/announcements/actions';
+import { Megaphone, X } from 'lucide-react';
 
 interface MenuItem {
     name: string;
@@ -16,6 +18,7 @@ interface DashboardLayoutClientProps {
     profile: { full_name: string; role: string; branch_name?: string; is_platform_admin?: boolean; is_super_admin?: boolean };
     children: React.ReactNode;
     isImpersonating?: boolean;
+    announcements?: Announcement[];
 }
 import { stopImpersonating } from '@/app/admin/actions/impersonate';
 
@@ -36,6 +39,7 @@ export default function DashboardLayoutClient({
     profile,
     children,
     isImpersonating = false,
+    announcements = [],
 }: DashboardLayoutClientProps) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const pathname = usePathname();

@@ -4,7 +4,9 @@ import AddPlanModal from './AddPlanModal';
 import EditPlanModal from './EditPlanModal';
 import DeletePlanButton from './DeletePlanButton';
 import GeneralConfigurationEditor from './GeneralConfigurationEditor';
+import AnnouncementManager from './AnnouncementManager';
 import { getSystemSettings } from './actions';
+import { getAllAnnouncements } from '@/app/admin/announcements/actions';
 
 async function getSubscriptionPlans() {
     const supabase = await createClient();
@@ -15,8 +17,9 @@ async function getSubscriptionPlans() {
 export default async function AdminSettingsPage() {
     const plansPromise = getSubscriptionPlans();
     const settingsPromise = getSystemSettings();
+    const announcementsPromise = getAllAnnouncements();
 
-    const [plans, settings] = await Promise.all([plansPromise, settingsPromise]);
+    const [plans, settings, announcements] = await Promise.all([plansPromise, settingsPromise, announcementsPromise]);
 
     return (
         <div className="p-8 space-y-8">
@@ -24,6 +27,9 @@ export default async function AdminSettingsPage() {
                 <h1 className="text-3xl font-bold text-white">ตั้งค่าระบบ (System Settings)</h1>
                 <p className="text-slate-400 mt-2">จัดการการตั้งค่าพื้นฐานและแพ็กเกจสมาชิก</p>
             </header>
+
+            {/* System Announcements */}
+            <AnnouncementManager announcements={announcements} />
 
             {/* Subscription Plans Section */}
             <section>
