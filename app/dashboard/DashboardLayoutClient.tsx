@@ -172,6 +172,28 @@ export default function DashboardLayoutClient({
 
             {/* Main Content */}
             <main className="flex-1 lg:ml-64 overflow-auto pt-14 lg:pt-0 pb-16 lg:pb-0">
+                {/* Announcement Banners */}
+                {announcements.length > 0 && (
+                    <div className="space-y-1 p-4 pb-0">
+                        {announcements.map((ann) => (
+                            <div
+                                key={ann.id}
+                                className={`px-4 py-3 flex items-start gap-3 rounded-lg relative shadow-sm ${ann.type === 'info' ? 'bg-blue-600 text-white' :
+                                        ann.type === 'warning' ? 'bg-yellow-500 text-black' :
+                                            ann.type === 'danger' ? 'bg-red-600 text-white' :
+                                                'bg-emerald-600 text-white'
+                                    }`}
+                            >
+                                <Megaphone className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                                <div className="flex-1 pr-6">
+                                    <p className="font-bold text-sm">{ann.title}</p>
+                                    {ann.content && <p className="text-sm opacity-90 mt-1 whitespace-pre-wrap">{ann.content}</p>}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+
                 {isImpersonating && (
                     <div className="bg-purple-600 text-white px-4 py-2 flex justify-between items-center shadow-lg mb-4 sticky top-0 z-30">
                         <div className="flex items-center gap-2">
