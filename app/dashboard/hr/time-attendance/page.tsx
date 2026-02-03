@@ -39,7 +39,7 @@ export default function TimeAttendancePage() {
 
             const { data: profile } = await supabase
                 .from('profiles')
-                .select('role, organization_id')
+                .select('role, organization_id, is_platform_admin')
                 .eq('id', user.id)
                 .single();
 
@@ -48,6 +48,18 @@ export default function TimeAttendancePage() {
             const isOwnerOrManager = ['owner', 'manager'].includes(profile.role);
             setIsAdmin(isOwnerOrManager);
 
+            let effectiveOrgId = profile.organization_id;
+
+            // Impersonation Logic
+            if (profile.is_platform_admin) {
+                const match = document.cookie.match(new RegExp('(^| )x-impersonate-org-id-v2=([^;]+)'));
+                if (match) {
+                    effectiveOrgId = match[2];
+                    // If impersonating, treat as admin/manager to see all data
+                    setIsAdmin(true);
+                }
+            }
+
             let query = supabase
                 .from('time_entries')
                 .select(`
@@ -55,7 +67,7 @@ export default function TimeAttendancePage() {
                     profile:profiles(first_name, last_name, email),
                     branch:branches(name)
                 `)
-                .eq('organization_id', profile.organization_id)
+                .eq('organization_id', effectiveOrgId)
                 .gte('clock_in', `${startDate}T00:00:00`)
                 .lte('clock_in', `${endDate}T23:59:59`)
                 .order('clock_in', { ascending: false });

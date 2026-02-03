@@ -2,6 +2,8 @@ import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 import ShiftClient from './ShiftClient';
 
+import { cookies } from 'next/headers';
+
 async function getShiftData() {
     const supabase = await createClient();
     const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -12,7 +14,7 @@ async function getShiftData() {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id, role')
+        .select('organization_id, role, is_platform_admin')
         .eq('id', user.id)
         .single();
 
@@ -20,7 +22,23 @@ async function getShiftData() {
         return { activeShift: null, history: [] };
     }
 
-    // Fetch active shift for current user
+    let effectiveOrgId = profile.organization_id;
+    let effectiveRole = profile.role;
+
+    // Impersonation Logic
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+            // Treat as manager when impersonating to see all shifts
+            effectiveRole = 'manager';
+        }
+    }
+
+    // Fetch active shift for current user (this might need adjustment if we want to see impersonated user's active shift? 
+    // Usually active shift is per user. A super admin impersonating probably doesn't have an active shift in that org.
+    // So we keep this as is, showing the Super Admin's invalid shift or null)
     const { data: activeShift } = await supabase
         .from('shifts')
         .select('*')
@@ -35,9 +53,14 @@ async function getShiftData() {
             *,
             profiles (full_name, email)
         `)
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .order('started_at', { ascending: false })
         .limit(20);
+
+    // If not owner/manager, only see own shifts
+    if (effectiveRole !== 'owner' && effectiveRole !== 'manager') {
+        query = query.eq('user_id', user.id);
+    }
 
     // If not owner/manager, only see own shifts
     if (profile.role !== 'owner' && profile.role !== 'manager') {
