@@ -65,17 +65,28 @@ export default function PayrollPage() {
 
         const { data: profile } = await supabase
             .from('profiles')
-            .select('organization_id')
+            .select('organization_id, is_platform_admin')
             .eq('id', user.id)
             .single();
 
         if (!profile) return;
-        setOrganizationId(profile.organization_id);
+
+        let targetOrgId = profile.organization_id;
+
+        // Check for impersonation cookie on client side
+        if (profile.is_platform_admin) {
+            const match = document.cookie.match(new RegExp('(^| )x-impersonate-org-id-v2=([^;]+)'));
+            if (match) {
+                targetOrgId = match[2];
+            }
+        }
+
+        setOrganizationId(targetOrgId);
 
         const { data: periodsData } = await supabase
             .from('payroll_periods')
             .select('*')
-            .eq('organization_id', profile.organization_id)
+            .eq('organization_id', targetOrgId)
             .order('period_start', { ascending: false });
 
         setPeriods(periodsData || []);
