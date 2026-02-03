@@ -1,50 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/utils/supabase/client';
-import Link from 'next/link';
-import { exportToExcel, exportToPDF, exportPayslipPDF } from '@/utils/export';
-
-interface PayrollPeriod {
-    id: string;
-    period_name: string;
-    period_start: string;
-    period_end: string;
-    status: string;
-    calculated_at: string | null;
-    paid_at: string | null;
-}
-
-interface PayrollRecord {
-    id: string;
-    user_id: string;
-    base_salary: number;
-    hours_worked: number;
-    days_worked: number;
-    position_allowance: number;
-    diligence_allowance: number;
-    other_allowance: number;
-    commission_total: number;
-    total_earnings: number;
-    social_security: number;
-    withholding_tax: number;
-    loan_deduction: number;
-    other_deduction: number;
-    total_deductions: number;
-    net_salary: number;
-    profile: {
-        first_name: string;
-        last_name: string;
-        email: string;
-    };
-}
+import { fetchPayrollPeriods, fetchPayrollRecords, createPayrollPeriod, calculatePayrollAction, markPeriodAsPaid } from './actions';
 
 export default function PayrollClient({
     initialOrganizationId,
 }: {
     initialOrganizationId: string | null;
 }) {
-    const supabase = createClient();
+    // const supabase = createClient(); // Removed
     const [periods, setPeriods] = useState<PayrollPeriod[]>([]);
     const [selectedPeriod, setSelectedPeriod] = useState<PayrollPeriod | null>(null);
     const [records, setRecords] = useState<PayrollRecord[]>([]);
@@ -68,28 +32,19 @@ export default function PayrollClient({
 
     async function fetchPeriods(orgId: string) {
         setLoading(true);
-
-        const { data: periodsData } = await supabase
-            .from('payroll_periods')
-            .select('*')
-            .eq('organization_id', orgId)
-            .order('period_start', { ascending: false });
-
-        setPeriods(periodsData || []);
+        const { data, error } = await fetchPayrollPeriods(orgId);
+        if (!error && data) {
+            setPeriods(data as PayrollPeriod[]);
+        }
         setLoading(false);
     }
 
     async function fetchRecords(periodId: string) {
-        const { data } = await supabase
-            .from('payroll_records')
-            .select(`
-                *,
-                profile:profiles(first_name, last_name, email)
-            `)
-            .eq('period_id', periodId)
-            .order('net_salary', { ascending: false });
-
-        setRecords((data || []) as PayrollRecord[]);
+        if (!organizationId) return;
+        const { data, error } = await fetchPayrollRecords(periodId, organizationId);
+        if (!error && data) {
+            setRecords((data || []) as PayrollRecord[]);
+        }
     }
 
     const selectPeriod = async (period: PayrollPeriod) => {
@@ -101,176 +56,52 @@ export default function PayrollClient({
         e.preventDefault();
         if (!organizationId) return;
 
-        const { data: { user } } = await supabase.auth.getUser();
+        try {
+            await createPayrollPeriod({
+                period_name: periodName,
+                period_start: periodStart,
+                period_end: periodEnd
+            }, organizationId);
 
-        await supabase.from('payroll_periods').insert({
-            organization_id: organizationId,
-            period_name: periodName,
-            period_start: periodStart,
-            period_end: periodEnd,
-            status: 'DRAFT',
-            created_by: user?.id
-        });
-
-        setIsNewPeriodOpen(false);
-        setPeriodName('');
-        setPeriodStart('');
-        setPeriodEnd('');
-        fetchPeriods(organizationId);
+            setIsNewPeriodOpen(false);
+            setPeriodName('');
+            setPeriodStart('');
+            setPeriodEnd('');
+            fetchPeriods(organizationId);
+        } catch (error) {
+            alert('Error creating period');
+        }
     };
 
     const calculatePayroll = async () => {
         if (!selectedPeriod || !organizationId) return;
         setCalculating(true);
 
-        try {
-            // Fetch all employees with salary settings
-            const { data: salaries } = await supabase
-                .from('employee_salaries')
-                .select('*')
-                .eq('organization_id', organizationId);
+        const result = await calculatePayrollAction(selectedPeriod.id, selectedPeriod.period_start, selectedPeriod.period_end, organizationId);
 
-            if (!salaries || salaries.length === 0) {
-                alert('ไม่พบข้อมูลเงินเดือนพนักงาน กรุณาตั้งค่าก่อน');
-                setCalculating(false);
-                return;
-            }
-
-            // Fetch time entries for the period
-            const { data: timeEntries } = await supabase
-                .from('time_entries')
-                .select('user_id, work_duration_minutes')
-                .eq('organization_id', organizationId)
-                .eq('status', 'COMPLETED')
-                .gte('clock_in', `${selectedPeriod.period_start}T00:00:00`)
-                .lte('clock_in', `${selectedPeriod.period_end}T23:59:59`);
-
-            // Fetch commissions for the period
-            const { data: commissions } = await supabase
-                .from('commission_records')
-                .select('user_id, commission_amount')
-                .eq('organization_id', organizationId)
-                .gte('created_at', `${selectedPeriod.period_start}T00:00:00`)
-                .lte('created_at', `${selectedPeriod.period_end}T23:59:59`);
-
-            // Fetch active loans
-            const { data: loans } = await supabase
-                .from('employee_loans')
-                .select('*')
-                .eq('organization_id', organizationId)
-                .eq('status', 'ACTIVE');
-
-            // Calculate for each employee
-            const payrollRecords = [];
-
-            for (const salary of salaries) {
-                // Calculate hours worked
-                const userTimeEntries = (timeEntries || []).filter(t => t.user_id === salary.user_id);
-                const totalMinutes = userTimeEntries.reduce((sum, t) => sum + (t.work_duration_minutes || 0), 0);
-                const hoursWorked = totalMinutes / 60;
-                const daysWorked = Math.ceil(hoursWorked / 8);
-
-                // Calculate base salary
-                let baseSalary = 0;
-                if (salary.salary_type === 'MONTHLY') {
-                    baseSalary = salary.base_amount;
-                } else if (salary.salary_type === 'DAILY') {
-                    baseSalary = salary.base_amount * daysWorked;
-                } else if (salary.salary_type === 'HOURLY') {
-                    baseSalary = salary.base_amount * hoursWorked;
-                }
-
-                // Calculate commission
-                const userCommissions = (commissions || []).filter(c => c.user_id === salary.user_id);
-                const commissionTotal = userCommissions.reduce((sum, c) => sum + (c.commission_amount || 0), 0);
-
-                // Calculate allowances
-                const positionAllowance = salary.position_allowance || 0;
-                const diligenceAllowance = salary.diligence_allowance || 0;
-                const otherAllowance = salary.other_allowance || 0;
-
-                // Total earnings
-                const totalEarnings = baseSalary + commissionTotal + positionAllowance + diligenceAllowance + otherAllowance;
-
-                // Calculate deductions
-                let socialSecurity = 0;
-                if (salary.social_security_enabled) {
-                    socialSecurity = Math.min(totalEarnings * 0.05, 750); // Max 750 baht
-                }
-
-                let withholdingTax = 0;
-                if (salary.withholding_tax_enabled && totalEarnings > 26000) {
-                    // Simple progressive tax calculation
-                    withholdingTax = (totalEarnings - 26000) * 0.05;
-                }
-
-                // Calculate loan deductions
-                const userLoans = (loans || []).filter(l => l.user_id === salary.user_id);
-                const loanDeduction = userLoans.reduce((sum, l) => sum + (l.monthly_deduction || 0), 0);
-
-                const totalDeductions = socialSecurity + withholdingTax + loanDeduction;
-                const netSalary = totalEarnings - totalDeductions;
-
-                payrollRecords.push({
-                    organization_id: organizationId,
-                    period_id: selectedPeriod.id,
-                    user_id: salary.user_id,
-                    base_salary: baseSalary,
-                    hours_worked: hoursWorked,
-                    days_worked: daysWorked,
-                    position_allowance: positionAllowance,
-                    diligence_allowance: diligenceAllowance,
-                    other_allowance: otherAllowance,
-                    commission_total: commissionTotal,
-                    total_earnings: totalEarnings,
-                    social_security: socialSecurity,
-                    withholding_tax: withholdingTax,
-                    loan_deduction: loanDeduction,
-                    other_deduction: 0,
-                    total_deductions: totalDeductions,
-                    net_salary: netSalary
-                });
-            }
-
-            // Delete existing records for this period
-            await supabase.from('payroll_records').delete().eq('period_id', selectedPeriod.id);
-
-            // Insert new records
-            if (payrollRecords.length > 0) {
-                await supabase.from('payroll_records').insert(payrollRecords);
-            }
-
-            // Update period status
-            await supabase
-                .from('payroll_periods')
-                .update({ status: 'CALCULATED', calculated_at: new Date().toISOString() })
-                .eq('id', selectedPeriod.id);
-
+        if (result.success) {
             // Refresh data
             await fetchPeriods(organizationId);
             await fetchRecords(selectedPeriod.id);
             setSelectedPeriod({ ...selectedPeriod, status: 'CALCULATED' });
-
             alert('คำนวณเงินเดือนเสร็จสิ้น!');
-        } catch (error) {
-            console.error('Calculation error:', error);
-            alert('เกิดข้อผิดพลาดในการคำนวณ');
-        } finally {
-            setCalculating(false);
+        } else {
+            alert('เกิดข้อผิดพลาด: ' + result.error);
         }
+        setCalculating(false);
     };
 
     const markAsPaid = async () => {
         if (!selectedPeriod || !organizationId) return;
         if (!confirm('ยืนยันการจ่ายเงินเดือนงวดนี้?')) return;
 
-        await supabase
-            .from('payroll_periods')
-            .update({ status: 'PAID', paid_at: new Date().toISOString() })
-            .eq('id', selectedPeriod.id);
-
-        await fetchPeriods(organizationId);
-        setSelectedPeriod({ ...selectedPeriod, status: 'PAID' });
+        try {
+            await markPeriodAsPaid(selectedPeriod.id, organizationId);
+            await fetchPeriods(organizationId);
+            setSelectedPeriod({ ...selectedPeriod, status: 'PAID' });
+        } catch (error) {
+            alert('Error updating status');
+        }
     };
 
     const formatCurrency = (amount: number) => {
