@@ -14,7 +14,7 @@ interface Product {
     image_url: string | null;
 }
 
-async function getProducts() {
+async function getProducts(branchId?: string) {
     const supabase = await createClient();
 
     const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -49,22 +49,26 @@ async function getProducts() {
     // OR we need to fetch branches of that org.
     // The current logic uses profile.branch_id which refers to the ADMIN's branch (likely null or irrelevant).
 
-    let targetBranchId = (profile.is_platform_admin && effectiveOrgId !== profile.organization_id) ? null : profile.branch_id;
+    // Fetch all branches for switcher
+    const { data: branches } = await supabase
+        .from('branches')
+        .select('id, name, is_main')
+        .eq('organization_id', effectiveOrgId)
+        .order('is_main', { ascending: false });
+
+    // Determine target branch
+    let targetBranchId: string | undefined = branchId;
 
     if (!targetBranchId) {
-        const { data: mainBranch } = await supabase
-            .from('branches')
-            .select('id')
-            .eq('organization_id', effectiveOrgId)
-            .eq('is_main', true)
-            .single();
+        // Default to Main Branch or First Branch
+        const mainBranch = branches?.find(b => b.is_main) || branches?.[0];
         targetBranchId = mainBranch?.id;
     }
 
     // Fetch branch details for display
     let branchName = 'Unknown Branch';
-    if (targetBranchId) {
-        const { data: branch } = await supabase.from('branches').select('name').eq('id', targetBranchId).single();
+    if (targetBranchId && branches) {
+        const branch = branches.find(b => b.id === targetBranchId);
         if (branch) branchName = branch.name;
     }
 
@@ -80,34 +84,35 @@ async function getProducts() {
         name
       ),
       product_stocks (
-        quantity
+        quantity,
+        branch_id
       )
     `)
         .eq('organization_id', effectiveOrgId);
 
     if (targetBranchId) {
-        query = query.eq('product_stocks.branch_id', targetBranchId); // Filter stocks for this branch
+        query = query.eq('product_stocks.branch_id', targetBranchId);
     }
 
     const { data: products, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
         console.error('Error fetching products:', error);
-        return { products: [], organizationId: profile.organization_id, branchName };
+        return { products: [], organizationId: profile.organization_id, branchName, branches: [], currentBranchId: targetBranchId };
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transformedProducts: Product[] = (products || []).map((p: any) => {
         // Find stock for the target branch
-        const stockRecord = p.product_stocks?.find((s: any) => s.quantity !== undefined); // .eq filter above might return array of 1 or 0
-        const quantity = stockRecord ? stockRecord.quantity : 0; // Default to 0 if no stock record found for this branch
+        const stockRecord = p.product_stocks?.find((s: any) => s.branch_id === targetBranchId);
+        const quantity = stockRecord ? stockRecord.quantity : 0;
 
         return {
             id: p.id,
             name: p.name,
             sku: p.sku,
             selling_price: p.selling_price,
-            current_stock: quantity, // Use branch stock
+            current_stock: quantity,
             category_name: Array.isArray(p.categories)
                 ? p.categories[0]?.name || null
                 : p.categories?.name || null,
@@ -115,17 +120,28 @@ async function getProducts() {
         };
     });
 
-    return { products: transformedProducts, organizationId: profile.organization_id, branchName };
+    return {
+        products: transformedProducts,
+        organizationId: profile.organization_id,
+        branchName,
+        branches: branches || [],
+        currentBranchId: targetBranchId
+    };
 }
 
-export default async function InventoryPage() {
-    const result = await getProducts();
+export default async function InventoryPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ branchId?: string }>;
+}) {
+    const params = await searchParams;
+    const result = await getProducts(params.branchId);
 
     if ('error' in result) {
         redirect('/');
     }
 
-    const { products, organizationId, branchName } = result;
+    const { products, organizationId, branchName, branches, currentBranchId } = result;
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('th-TH', {
@@ -143,10 +159,24 @@ export default async function InventoryPage() {
                     <div>
                         <h1 className="text-2xl font-bold text-white flex items-center gap-3">
                             จัดการคลังสินค้า
-                            {branchName && (
-                                <span className="text-sm font-normal bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full border border-blue-500/30">
-                                    {branchName}
-                                </span>
+                            {branches && branches.length > 0 && (
+                                <div className="relative group">
+                                    <button className="flex items-center gap-2 text-sm font-normal bg-blue-500/20 text-blue-400 px-3 py-1 rounded-full border border-blue-500/30 hover:bg-blue-500/30 transition-colors">
+                                        {branchName}
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                    </button>
+                                    <div className="absolute top-full left-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden hidden group-hover:block z-20">
+                                        {branches.map(branch => (
+                                            <Link
+                                                key={branch.id}
+                                                href={`/dashboard/inventory?branchId=${branch.id}`}
+                                                className={`block px-4 py-2 text-sm hover:bg-slate-700 transition-colors ${branch.id === currentBranchId ? 'text-blue-400 bg-blue-500/10' : 'text-slate-300'}`}
+                                            >
+                                                {branch.name} {branch.is_main && '(Main)'}
+                                            </Link>
+                                        ))}
+                                    </div>
+                                </div>
                             )}
                         </h1>
                         <p className="text-slate-400 text-sm mt-1">จัดการสินค้าและสต็อกของสาขานี้</p>
