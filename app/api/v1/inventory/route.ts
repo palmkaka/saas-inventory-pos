@@ -1,15 +1,11 @@
 import { NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/utils/supabase/admin';
 import { validateApiKey, apiSuccess, apiError, logApiRequest } from '@/utils/api-auth';
-
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 // GET /api/v1/inventory - ดึงข้อมูลสต็อก
 export async function GET(request: NextRequest) {
     const startTime = Date.now();
+    const supabaseAdmin = createAdminClient();
 
     const auth = await validateApiKey(request);
     if (!auth.valid || !auth.context) {
@@ -78,6 +74,7 @@ export async function GET(request: NextRequest) {
 // PATCH /api/v1/inventory - อัพเดทสต็อก
 export async function PATCH(request: NextRequest) {
     const startTime = Date.now();
+    const supabaseAdmin = createAdminClient();
 
     const auth = await validateApiKey(request);
     if (!auth.valid || !auth.context) {

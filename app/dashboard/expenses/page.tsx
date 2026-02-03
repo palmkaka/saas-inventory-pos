@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { DeleteExpenseButton } from './ExpenseClient';
+import { cookies } from 'next/headers';
 
 interface Expense {
     id: string;
@@ -30,12 +31,22 @@ async function getExpenses() {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id')
+        .select('organization_id, is_platform_admin, role')
         .eq('id', user.id)
         .single();
 
     if (!profile?.organization_id) {
         return { expenses: [], organizationId: null };
+    }
+
+    // Impersonation Logic
+    let effectiveOrgId = profile.organization_id;
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+        }
     }
 
     // Fetch expenses with category join
@@ -53,13 +64,13 @@ async function getExpenses() {
                 group_type
             )
         `)
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .order('expense_date', { ascending: false })
         .limit(100);
 
     if (error) {
         console.error('Error fetching expenses:', error);
-        return { expenses: [], organizationId: profile.organization_id };
+        return { expenses: [], organizationId: effectiveOrgId };
     }
 
     // Transform data
@@ -80,7 +91,7 @@ async function getExpenses() {
         };
     });
 
-    return { expenses: transformedExpenses, organizationId: profile.organization_id };
+    return { expenses: transformedExpenses, organizationId: effectiveOrgId };
 }
 
 export default async function ExpensesPage() {

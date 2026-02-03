@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { DeleteButton } from './InventoryClient';
+import { cookies } from 'next/headers';
 
 interface Product {
     id: string;
@@ -24,7 +25,7 @@ async function getProducts() {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id, branch_id')
+        .select('organization_id, branch_id, is_platform_admin, role')
         .eq('id', user.id)
         .single();
 
@@ -32,15 +33,29 @@ async function getProducts() {
         return { products: [], organizationId: null, branchName: null };
     }
 
+    // Impersonation Logic
+    let effectiveOrgId = profile.organization_id;
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+        }
+    }
+
     // Determine branch to show
-    // If user has a branch_id, use that. If not (e.g. owner/admin not assigned), try to find Main Branch
-    let targetBranchId = profile.branch_id;
+    // If user has a branch_id (and not impersonating OR impersonating logic handled differently), use that.
+    // For simplicity in this fix, if impersonating, we likely want the MAIN branch of the impersonated org, 
+    // OR we need to fetch branches of that org.
+    // The current logic uses profile.branch_id which refers to the ADMIN's branch (likely null or irrelevant).
+
+    let targetBranchId = (profile.is_platform_admin && effectiveOrgId !== profile.organization_id) ? null : profile.branch_id;
 
     if (!targetBranchId) {
         const { data: mainBranch } = await supabase
             .from('branches')
             .select('id')
-            .eq('organization_id', profile.organization_id)
+            .eq('organization_id', effectiveOrgId)
             .eq('is_main', true)
             .single();
         targetBranchId = mainBranch?.id;
@@ -68,7 +83,7 @@ async function getProducts() {
         quantity
       )
     `)
-        .eq('organization_id', profile.organization_id);
+        .eq('organization_id', effectiveOrgId);
 
     if (targetBranchId) {
         query = query.eq('product_stocks.branch_id', targetBranchId); // Filter stocks for this branch

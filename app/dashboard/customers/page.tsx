@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 import CustomerClient from './CustomerClient';
+import { cookies } from 'next/headers';
 
 interface Customer {
     id: string;
@@ -24,7 +25,7 @@ async function getCustomers() {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id, role')
+        .select('organization_id, role, is_platform_admin')
         .eq('id', user.id)
         .single();
 
@@ -32,18 +33,28 @@ async function getCustomers() {
         return { customers: [], loyaltySettings: null };
     }
 
+    // Impersonation Logic
+    let effectiveOrgId = profile.organization_id;
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+        }
+    }
+
     // Fetch loyalty settings
     const { data: orgData } = await supabase
         .from('organizations')
         .select('loyalty_enabled, points_per_currency, points_to_currency')
-        .eq('id', profile.organization_id)
+        .eq('id', effectiveOrgId)
         .single();
 
     // Fetch customers
     const { data: customers, error } = await supabase
         .from('customers')
         .select('*')
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -54,7 +65,7 @@ async function getCustomers() {
     return {
         customers: customers || [],
         loyaltySettings: orgData,
-        organizationId: profile.organization_id
+        organizationId: effectiveOrgId
     };
 }
 

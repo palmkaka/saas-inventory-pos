@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { DeleteIncomeButton } from './IncomesClient';
+import { cookies } from 'next/headers';
 
 interface Income {
     id: string;
@@ -30,12 +31,22 @@ async function getIncomes() {
 
     const { data: profile } = await supabase
         .from('profiles')
-        .select('organization_id')
+        .select('organization_id, is_platform_admin, role')
         .eq('id', user.id)
         .single();
 
     if (!profile?.organization_id) {
         return { incomes: [], organizationId: null };
+    }
+
+    // Impersonation Logic
+    let effectiveOrgId = profile.organization_id;
+    if (profile.is_platform_admin) {
+        const cookieStore = await cookies();
+        const impersonatedOrgId = cookieStore.get('x-impersonate-org-id-v2')?.value;
+        if (impersonatedOrgId) {
+            effectiveOrgId = impersonatedOrgId;
+        }
     }
 
     // Fetch incomes with category join
@@ -53,13 +64,13 @@ async function getIncomes() {
                 income_type
             )
         `)
-        .eq('organization_id', profile.organization_id)
+        .eq('organization_id', effectiveOrgId)
         .order('income_date', { ascending: false })
         .limit(100);
 
     if (error) {
         console.error('Error fetching incomes:', error);
-        return { incomes: [], organizationId: profile.organization_id };
+        return { incomes: [], organizationId: effectiveOrgId };
     }
 
     // Transform data
@@ -80,7 +91,7 @@ async function getIncomes() {
         };
     });
 
-    return { incomes: transformedIncomes, organizationId: profile.organization_id };
+    return { incomes: transformedIncomes, organizationId: effectiveOrgId };
 }
 
 export default async function IncomesPage() {

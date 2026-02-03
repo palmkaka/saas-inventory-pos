@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 
 // สร้าง Supabase admin client สำหรับ API
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// const supabaseAdmin = createClient(
+//     process.env.NEXT_PUBLIC_SUPABASE_URL!,
+//     process.env.SUPABASE_SERVICE_ROLE_KEY!
+// );
 
 interface ApiKeyData {
     id: string;
@@ -35,49 +35,58 @@ export async function validateApiKey(request: NextRequest): Promise<{
         return { valid: false, error: 'Missing API Key or Secret' };
     }
 
-    // ค้นหา API Key
-    const { data: keyData, error } = await supabaseAdmin
-        .from('api_keys')
-        .select('id, organization_id, secret_hash, permissions, is_active, expires_at')
-        .eq('api_key', apiKey)
-        .single();
+    // Lazy load admin client
+    try {
+        const { createAdminClient } = await import('@/utils/supabase/admin');
+        const supabaseAdmin = createAdminClient();
 
-    if (error || !keyData) {
-        return { valid: false, error: 'Invalid API Key' };
-    }
+        // ค้นหา API Key
+        const { data: keyData, error } = await supabaseAdmin
+            .from('api_keys')
+            .select('id, organization_id, secret_hash, permissions, is_active, expires_at')
+            .eq('api_key', apiKey)
+            .single();
 
-    const apiKeyData = keyData as ApiKeyData & { secret_hash: string };
-
-    // ตรวจสอบว่า active
-    if (!apiKeyData.is_active) {
-        return { valid: false, error: 'API Key is inactive' };
-    }
-
-    // ตรวจสอบหมดอายุ
-    if (apiKeyData.expires_at && new Date(apiKeyData.expires_at) < new Date()) {
-        return { valid: false, error: 'API Key has expired' };
-    }
-
-    // ตรวจสอบ secret
-    const secretHash = crypto.createHash('sha256').update(apiSecret).digest('hex');
-    if (secretHash !== apiKeyData.secret_hash) {
-        return { valid: false, error: 'Invalid API Secret' };
-    }
-
-    // อัพเดท last_used_at
-    await supabaseAdmin
-        .from('api_keys')
-        .update({ last_used_at: new Date().toISOString() })
-        .eq('id', apiKeyData.id);
-
-    return {
-        valid: true,
-        context: {
-            organizationId: apiKeyData.organization_id,
-            apiKeyId: apiKeyData.id,
-            permissions: apiKeyData.permissions
+        if (error || !keyData) {
+            return { valid: false, error: 'Invalid API Key' };
         }
-    };
+
+        const apiKeyData = keyData as ApiKeyData & { secret_hash: string };
+
+        // ตรวจสอบว่า active
+        if (!apiKeyData.is_active) {
+            return { valid: false, error: 'API Key is inactive' };
+        }
+
+        // ตรวจสอบหมดอายุ
+        if (apiKeyData.expires_at && new Date(apiKeyData.expires_at) < new Date()) {
+            return { valid: false, error: 'API Key has expired' };
+        }
+
+        // ตรวจสอบ secret
+        const secretHash = crypto.createHash('sha256').update(apiSecret).digest('hex');
+        if (secretHash !== apiKeyData.secret_hash) {
+            return { valid: false, error: 'Invalid API Secret' };
+        }
+
+        // อัพเดท last_used_at
+        await supabaseAdmin
+            .from('api_keys')
+            .update({ last_used_at: new Date().toISOString() })
+            .eq('id', apiKeyData.id);
+
+        return {
+            valid: true,
+            context: {
+                organizationId: apiKeyData.organization_id,
+                apiKeyId: apiKeyData.id,
+                permissions: apiKeyData.permissions
+            }
+        };
+    } catch (error) {
+        console.error('API Validation Error:', error);
+        return { valid: false, error: 'Internal Server Error' };
+    }
 }
 
 // Log API request
@@ -91,17 +100,24 @@ export async function logApiRequest(
     responseTimeMs: number,
     request: NextRequest
 ) {
-    await supabaseAdmin.from('api_logs').insert({
-        api_key_id: apiKeyId,
-        organization_id: organizationId,
-        endpoint,
-        method,
-        status_code: statusCode,
-        request_body: requestBody,
-        response_time_ms: responseTimeMs,
-        ip_address: request.headers.get('x-forwarded-for') || 'unknown',
-        user_agent: request.headers.get('user-agent') || 'unknown'
-    });
+    try {
+        const { createAdminClient } = await import('@/utils/supabase/admin');
+        const supabaseAdmin = createAdminClient();
+
+        await supabaseAdmin.from('api_logs').insert({
+            api_key_id: apiKeyId,
+            organization_id: organizationId,
+            endpoint,
+            method,
+            status_code: statusCode,
+            request_body: requestBody,
+            response_time_ms: responseTimeMs,
+            ip_address: request.headers.get('x-forwarded-for') || 'unknown',
+            user_agent: request.headers.get('user-agent') || 'unknown'
+        });
+    } catch (error) {
+        console.error('Failed to log API request:', error);
+    }
 }
 
 // Response helpers
